@@ -1,101 +1,378 @@
-import Image from "next/image";
+"use client"
 
-export default function Home() {
+import {
+  CheckCircle2Icon,
+  Loader2Icon,
+  SearchIcon,
+  XCircleIcon,
+  ZapIcon,
+} from "lucide-react"
+import { useState } from "react"
+
+import { PlatePingWordmark } from "@/components/plateping-logo"
+import { PlatePreview } from "@/components/plate-preview"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { USMap } from "@/components/us-map"
+import { AnimatedTabs } from "@/components/ui/animated-tabs"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  allowedPlatePattern,
+  checkPlate,
+  type PlateValidationResult,
+} from "@/lib/plate-validation"
+import {
+  getStatePlateRule,
+  liveAvailabilitySubheading,
+  liveCheckStates,
+} from "@/lib/state-plate-rules"
+import { getStateByFips, US_STATES } from "@/lib/states"
+import { cn } from "@/lib/utils"
+
+const NAV_TABS = [
+  { label: "Home" },
+  { label: "How it works" },
+  { label: "Recent checks" },
+]
+
+const LIVE_CHECK_STATES = liveCheckStates()
+
+type LiveStatus = "available" | "taken" | "not-allowed" | "error"
+
+type CheckResult = PlateValidationResult & {
+  liveStatus?: LiveStatus
+  eligiblePlateTypes?: string[]
+}
+
+/** How the current state was chosen — quick-select hides the dropdown. */
+type StatePickerSource = "dropdown" | "quick"
+
+export default function HomePage() {
+  const [selectedState, setSelectedState] = useState<string | null>(null)
+  const [statePickerSource, setStatePickerSource] =
+    useState<StatePickerSource>("dropdown")
+  const [plateText, setPlateText] = useState("")
+  const [result, setResult] = useState<CheckResult | null>(null)
+  const [isChecking, setIsChecking] = useState(false)
+
+  const canSubmit =
+    Boolean(selectedState) && plateText.trim().length > 0 && !isChecking
+  const selectedStateName = getStateByFips(selectedState)?.name ?? ""
+  const showPlatePreview =
+    Boolean(selectedState) && plateText.trim().length > 0
+  const hideStateDropdown = statePickerSource === "quick" && Boolean(selectedState)
+
+  function applyStateSelection(
+    value: string | null,
+    source: StatePickerSource
+  ) {
+    setSelectedState(value)
+    setStatePickerSource(source)
+    setResult(null)
+    if (value) {
+      setPlateText((current) =>
+        current.toUpperCase().replace(allowedPlatePattern(value), "")
+      )
+    }
+  }
+
+  function handleStateChange(value: string | null) {
+    applyStateSelection(value, "dropdown")
+  }
+
+  function handleQuickSelect(fips: string) {
+    applyStateSelection(fips, "quick")
+  }
+
+  function handleChooseDifferentState() {
+    applyStateSelection(null, "dropdown")
+  }
+
+  function handlePlateChange(value: string) {
+    setPlateText(
+      value.toUpperCase().replace(allowedPlatePattern(selectedState), "")
+    )
+    setResult(null)
+  }
+
+  async function handleCheckAvailability() {
+    const formatResult = checkPlate(selectedState, plateText)
+    setPlateText(formatResult.normalized)
+
+    const liveRule = getStatePlateRule(selectedState)
+    const canLiveCheck =
+      formatResult.ok &&
+      liveRule?.mode === "live" &&
+      Boolean(liveRule.endpoint)
+
+    if (!canLiveCheck || !liveRule?.endpoint) {
+      setResult(formatResult)
+      return
+    }
+
+    setIsChecking(true)
+    setResult({
+      ...formatResult,
+      messages: [
+        `Checking ${liveRule.name} availability for “${formatResult.normalized}”…`,
+      ],
+    })
+
+    try {
+      const response = await fetch(liveRule.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          liveRule.fips === "33"
+            ? {
+                plate: formatResult.normalized,
+                vehicleType: "Passenger",
+                plateType: "Passenger",
+              }
+            : { plate: formatResult.normalized }
+        ),
+      })
+      const live = (await response.json()) as {
+        status: LiveStatus
+        message?: string
+        eligiblePlateTypes?: string[]
+      }
+
+      const messagesByStatus: Record<LiveStatus, string[]> = {
+        available: [
+          `“${formatResult.normalized}” is available in ${liveRule.name}.`,
+          ...(live.eligiblePlateTypes?.length
+            ? [
+                `Eligible plate types: ${live.eligiblePlateTypes
+                  .slice(0, 8)
+                  .join(", ")}${
+                  live.eligiblePlateTypes.length > 8
+                    ? ` (+${live.eligiblePlateTypes.length - 8} more)`
+                    : ""
+                }.`,
+              ]
+            : []),
+        ],
+        taken: [
+          `“${formatResult.normalized}” is not available in ${liveRule.name}.`,
+        ],
+        "not-allowed": [
+          live.message ||
+            `“${formatResult.normalized}” is not allowed by ${liveRule.name}.`,
+        ],
+        error: [
+          live.message ||
+            "Live availability check failed. Try again in a moment.",
+        ],
+      }
+
+      setResult({
+        ...formatResult,
+        ok: live.status === "available",
+        liveStatus: live.status,
+        eligiblePlateTypes: live.eligiblePlateTypes,
+        messages: messagesByStatus[live.status],
+      })
+    } catch {
+      setResult({
+        ...formatResult,
+        ok: false,
+        liveStatus: "error",
+        messages: ["Live availability check failed. Try again in a moment."],
+      })
+    } finally {
+      setIsChecking(false)
+    }
+  }
+
+  function resultTitle(current: CheckResult): string {
+    if (current.liveStatus === "available") return "Available"
+    if (current.liveStatus === "taken") return "Not available"
+    if (current.liveStatus === "not-allowed") return "Not allowed"
+    if (current.liveStatus === "error") return "Check failed"
+    if (current.ok) return "Format check passed"
+    return "Invalid plate"
+  }
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <div className="flex min-h-svh flex-col bg-background">
+      <header className="bg-background">
+        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <PlatePingWordmark />
+          <nav>
+            <AnimatedTabs tabs={NAV_TABS} />
+          </nav>
+          <ThemeToggle />
         </div>
+      </header>
+
+      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:items-stretch lg:gap-8 lg:px-8 lg:py-8">
+        <section className="flex w-full flex-col justify-center lg:w-[40%] lg:pr-4">
+          <div className="mx-auto w-full max-w-md space-y-10 lg:mx-0">
+            <div className="space-y-4">
+              <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
+                Find your plate
+              </h1>
+              <p className="text-base text-muted-foreground sm:text-lg">
+                {liveAvailabilitySubheading()}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {LIVE_CHECK_STATES.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">
+                    Live check available for:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {LIVE_CHECK_STATES.map((state) => {
+                      const isActive = selectedState === state.fips
+                      return (
+                        <button
+                          key={state.fips}
+                          type="button"
+                          onClick={() => handleQuickSelect(state.fips)}
+                          aria-pressed={isActive}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-border border-l-[3px] border-l-accent bg-card px-3 py-2 text-left text-sm font-medium text-foreground shadow-[0_1px_4px_rgba(0,0,0,0.04)] transition-colors hover:bg-muted/60",
+                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                            isActive &&
+                              "border-accent/40 border-l-accent bg-secondary text-secondary-foreground ring-1 ring-accent/30"
+                          )}
+                        >
+                          <ZapIcon
+                            aria-hidden
+                            className="size-3.5 shrink-0 text-accent"
+                          />
+                          {state.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {!hideStateDropdown ? (
+                <Select
+                  value={selectedState}
+                  onValueChange={handleStateChange}
+                  items={US_STATES.map((state) => ({
+                    value: state.fips,
+                    label: state.name,
+                  }))}
+                >
+                  <SelectTrigger className="w-full rounded-[var(--radius)] bg-card">
+                    <SelectValue placeholder="Choose a state" />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false} align="start">
+                    {US_STATES.map((state) => (
+                      <SelectItem key={state.fips} value={state.fips}>
+                        {state.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+
+              <div className="space-y-2">
+                <div className="relative">
+                  <SearchIcon
+                    aria-hidden
+                    className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    value={plateText}
+                    onValueChange={handlePlateChange}
+                    placeholder="Type the plate you want"
+                    className="h-10 rounded-[var(--radius)] bg-card pl-9 shadow-[0_2px_10px_rgba(0,0,0,0.06)]"
+                    autoComplete="off"
+                    spellCheck={false}
+                    autoCapitalize="characters"
+                    aria-invalid={result ? !result.ok : undefined}
+                    disabled={isChecking}
+                  />
+                </div>
+                {hideStateDropdown ? (
+                  <button
+                    type="button"
+                    onClick={handleChooseDifferentState}
+                    className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                  >
+                    Choose a different state
+                  </button>
+                ) : null}
+              </div>
+
+              <Button
+                type="button"
+                size="lg"
+                className="h-10 w-full rounded-[var(--radius)]"
+                disabled={!canSubmit}
+                onClick={handleCheckAvailability}
+              >
+                {isChecking ? (
+                  <>
+                    <Loader2Icon className="animate-spin" />
+                    Checking…
+                  </>
+                ) : (
+                  "Check availability"
+                )}
+              </Button>
+
+              {result ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className={`rounded-[var(--radius)] border px-4 py-3 text-sm ${
+                    result.ok
+                      ? "border-accent/40 bg-secondary text-secondary-foreground"
+                      : "border-destructive/30 bg-destructive/10 text-destructive"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {isChecking ? (
+                      <Loader2Icon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
+                    ) : result.ok ? (
+                      <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-accent" />
+                    ) : (
+                      <XCircleIcon className="mt-0.5 size-4 shrink-0" />
+                    )}
+                    <div className="space-y-1">
+                      <p className="font-medium">{resultTitle(result)}</p>
+                      <ul className="space-y-1 text-sm opacity-90">
+                        {result.messages.map((message) => (
+                          <li key={message}>{message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {showPlatePreview ? (
+                <PlatePreview
+                  state={selectedStateName}
+                  plateText={plateText}
+                />
+              ) : null}
+            </div>
+          </div>
+        </section>
+
+        <section className="flex min-h-[320px] w-full flex-1 items-center justify-center overflow-hidden rounded-[var(--radius)] bg-muted p-4 sm:min-h-[420px] lg:w-[60%] lg:min-h-0 lg:p-6">
+          <div className="h-full max-h-[560px] w-full">
+            <USMap selectedStateFips={selectedState} />
+          </div>
+        </section>
       </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
-  );
+  )
 }
