@@ -1,18 +1,36 @@
 "use client"
 
-import * as React from "react"
-import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react"
+
+export type AnimatedTab = {
+  label: string
+  href?: string
+}
 
 export interface AnimatedTabsProps {
-  tabs: { label: string }[]
+  tabs: AnimatedTab[]
+}
+
+function labelForPath(pathname: string, tabs: AnimatedTab[]) {
+  return tabs.find((tab) => tab.href && tab.href === pathname)?.label
 }
 
 export function AnimatedTabs({ tabs }: AnimatedTabsProps) {
-  const [activeTab, setActiveTab] = useState(tabs[0].label)
+  const pathname = usePathname()
+  const pathLabel = labelForPath(pathname, tabs)
+  const [activeTab, setActiveTab] = useState(pathLabel ?? tabs[0].label)
   const containerRef = useRef<HTMLDivElement>(null)
-  const activeTabRef = useRef<HTMLButtonElement>(null)
+  const activeTabRef = useRef<HTMLAnchorElement | HTMLButtonElement | null>(
+    null
+  )
 
   useEffect(() => {
+    if (pathLabel) setActiveTab(pathLabel)
+  }, [pathLabel])
+
+  useLayoutEffect(() => {
     const container = containerRef.current
 
     if (container && activeTab) {
@@ -37,38 +55,86 @@ export function AnimatedTabs({ tabs }: AnimatedTabsProps) {
     <div className="relative mx-auto flex w-fit flex-col items-center rounded-full border border-primary/10 bg-secondary/50 px-4 py-2">
       <div
         ref={containerRef}
-        className="absolute z-10 w-full overflow-hidden [clip-path:inset(0px_75%_0px_0%_round_17px)] [transition:clip-path_0.25s_ease]"
+        className="pointer-events-none absolute z-10 w-full overflow-hidden [clip-path:inset(0px_75%_0px_0%_round_17px)] [transition:clip-path_0.25s_ease]"
       >
         <div className="relative flex w-full justify-center bg-primary">
           {tabs.map((tab, index) => (
-            <button
+            <TabControl
               key={index}
-              onClick={() => setActiveTab(tab.label)}
+              tab={tab}
               className="flex h-8 items-center rounded-full p-3 text-sm font-medium text-primary-foreground"
               tabIndex={-1}
-            >
-              {tab.label}
-            </button>
+              ariaHidden
+              onSelect={() => setActiveTab(tab.label)}
+            />
           ))}
         </div>
       </div>
 
       <div className="relative flex w-full justify-center">
-        {tabs.map(({ label }, index) => {
-          const isActive = activeTab === label
+        {tabs.map((tab, index) => {
+          const isActive = activeTab === tab.label
 
           return (
-            <button
+            <TabControl
               key={index}
-              ref={isActive ? activeTabRef : null}
-              onClick={() => setActiveTab(label)}
+              tab={tab}
+              isActive={isActive}
               className="flex h-8 cursor-pointer items-center rounded-full p-3 text-sm font-medium text-muted-foreground"
-            >
-              {label}
-            </button>
+              onSelect={() => setActiveTab(tab.label)}
+              controlRef={isActive ? activeTabRef : undefined}
+            />
           )
         })}
       </div>
     </div>
+  )
+}
+
+function TabControl({
+  tab,
+  className,
+  isActive = false,
+  tabIndex,
+  ariaHidden = false,
+  onSelect,
+  controlRef,
+}: {
+  tab: AnimatedTab
+  className: string
+  isActive?: boolean
+  tabIndex?: number
+  ariaHidden?: boolean
+  onSelect: () => void
+  controlRef?: Ref<HTMLAnchorElement | HTMLButtonElement>
+}) {
+  if (tab.href) {
+    return (
+      <Link
+        href={tab.href}
+        ref={controlRef as Ref<HTMLAnchorElement>}
+        onClick={onSelect}
+        className={className}
+        tabIndex={tabIndex}
+        aria-hidden={ariaHidden || undefined}
+        aria-current={isActive && !ariaHidden ? "page" : undefined}
+      >
+        {tab.label}
+      </Link>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      ref={controlRef as Ref<HTMLButtonElement>}
+      onClick={onSelect}
+      className={className}
+      tabIndex={tabIndex}
+      aria-hidden={ariaHidden || undefined}
+      aria-pressed={isActive && !ariaHidden ? true : undefined}
+    >
+      {tab.label}
+    </button>
   )
 }

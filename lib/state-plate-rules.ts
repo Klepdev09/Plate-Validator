@@ -77,20 +77,3 @@ export function isLiveCheckState(fips: string | null | undefined): boolean {
 export function liveCheckStates(): StatePlateRule[] {
   return STATE_PLATE_RULES.filter((rule) => rule.mode === "live")
 }
-
-/** Home subheading copy for currently confirmed live states. */
-export function liveAvailabilitySubheading(): string {
-  const live = liveCheckStates().map((rule) => rule.abbreviation)
-  if (live.length === 0) {
-    return "Format checks for every state."
-  }
-  if (live.length === 1) {
-    return `Live availability for ${live[0]}. Format checks for every other state.`
-  }
-  if (live.length === 2) {
-    return `Live availability for ${live[0]} and ${live[1]}. Format checks for every other state.`
-  }
-  const head = live.slice(0, -1).join(", ")
-  const last = live[live.length - 1]
-  return `Live availability for ${head}, and ${last}. Format checks for every other state.`
-}

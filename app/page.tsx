@@ -5,15 +5,12 @@ import {
   Loader2Icon,
   SearchIcon,
   XCircleIcon,
-  ZapIcon,
 } from "lucide-react"
 import { useState } from "react"
 
-import { PlatePingWordmark } from "@/components/plateping-logo"
 import { PlatePreview } from "@/components/plate-preview"
-import { ThemeToggle } from "@/components/theme-toggle"
+import { SiteHeader } from "@/components/site-header"
 import { USMap } from "@/components/us-map"
-import { AnimatedTabs } from "@/components/ui/animated-tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -28,19 +25,10 @@ import {
   checkPlate,
   type PlateValidationResult,
 } from "@/lib/plate-validation"
-import {
-  getStatePlateRule,
-  liveAvailabilitySubheading,
-  liveCheckStates,
-} from "@/lib/state-plate-rules"
+import { recordRecentCheck } from "@/lib/recent-checks"
+import { getStatePlateRule, liveCheckStates } from "@/lib/state-plate-rules"
 import { getStateByFips, US_STATES } from "@/lib/states"
 import { cn } from "@/lib/utils"
-
-const NAV_TABS = [
-  { label: "Home" },
-  { label: "How it works" },
-  { label: "Recent checks" },
-]
 
 const LIVE_CHECK_STATES = liveCheckStates()
 
@@ -114,6 +102,11 @@ export default function HomePage() {
 
     if (!canLiveCheck || !liveRule?.endpoint) {
       setResult(formatResult)
+      recordRecentCheck({
+        stateName: formatResult.state.name,
+        plate: formatResult.normalized,
+        resultType: formatResult.ok ? "valid-format" : "invalid-format",
+      })
       return
     }
 
@@ -173,12 +166,25 @@ export default function HomePage() {
         ],
       }
 
+      const liveStatus: LiveStatus =
+        live.status === "available" ||
+        live.status === "taken" ||
+        live.status === "not-allowed" ||
+        live.status === "error"
+          ? live.status
+          : "error"
+
       setResult({
         ...formatResult,
-        ok: live.status === "available",
-        liveStatus: live.status,
+        ok: liveStatus === "available",
+        liveStatus,
         eligiblePlateTypes: live.eligiblePlateTypes,
-        messages: messagesByStatus[live.status],
+        messages: messagesByStatus[liveStatus],
+      })
+      recordRecentCheck({
+        stateName: liveRule.name,
+        plate: formatResult.normalized,
+        resultType: liveStatus,
       })
     } catch {
       setResult({
@@ -186,6 +192,11 @@ export default function HomePage() {
         ok: false,
         liveStatus: "error",
         messages: ["Live availability check failed. Try again in a moment."],
+      })
+      recordRecentCheck({
+        stateName: liveRule.name,
+        plate: formatResult.normalized,
+        resultType: "error",
       })
     } finally {
       setIsChecking(false)
@@ -203,15 +214,7 @@ export default function HomePage() {
 
   return (
     <div className="flex min-h-svh flex-col bg-background">
-      <header className="bg-background">
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <PlatePingWordmark />
-          <nav>
-            <AnimatedTabs tabs={NAV_TABS} />
-          </nav>
-          <ThemeToggle />
-        </div>
-      </header>
+      <SiteHeader />
 
       <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:items-stretch lg:gap-8 lg:px-8 lg:py-8">
         <section className="flex w-full flex-col justify-center lg:w-[40%] lg:pr-4">
@@ -221,7 +224,8 @@ export default function HomePage() {
                 Find your plate
               </h1>
               <p className="text-base text-muted-foreground sm:text-lg">
-                {liveAvailabilitySubheading()}
+                Pick a state below for a live check, or search any state for a
+                quick format check
               </p>
             </div>
 
@@ -247,9 +251,9 @@ export default function HomePage() {
                               "border-accent/40 border-l-accent bg-secondary text-secondary-foreground ring-1 ring-accent/30"
                           )}
                         >
-                          <ZapIcon
+                          <span
                             aria-hidden
-                            className="size-3.5 shrink-0 text-accent"
+                            className="size-2 shrink-0 rounded-full bg-accent"
                           />
                           {state.name}
                         </button>
