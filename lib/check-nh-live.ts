@@ -6,7 +6,15 @@
 
 import "server-only"
 
-import { chromium, type Browser, type Page } from "playwright"
+import type { Browser, Page } from "playwright-core"
+
+import {
+  LIVE_CHECK_TIMEOUT_MS,
+  assertPageNotBlocked,
+  launchStealthBrowser,
+  prepareStealthPage,
+  withTimeout,
+} from "@/lib/playwright-live"
 
 export type NhLiveCheckStatus =
   | "available"
@@ -28,58 +36,6 @@ export type NhLiveCheckInput = {
 }
 
 const PLATECHECK_URL = "https://business.nh.gov/Platecheck/"
-const OVERALL_TIMEOUT_MS = 15_000
-const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`NH Platecheck timed out after ${ms}ms`)),
-      ms
-    )
-    promise.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (error) => {
-        clearTimeout(timer)
-        reject(error)
-      }
-    )
-  })
-}
-
-async function launchBrowser(): Promise<Browser> {
-  const common = {
-    headless: true,
-    args: ["--disable-blink-features=AutomationControlled"],
-  }
-
-  try {
-    // Bundled Chromium is blocked by Akamai (403). Prefer installed Chrome.
-    return await chromium.launch({ ...common, channel: "chrome" })
-  } catch {
-    return await chromium.launch(common)
-  }
-}
-
-async function preparePage(browser: Browser): Promise<Page> {
-  const context = await browser.newContext({
-    userAgent: USER_AGENT,
-    locale: "en-US",
-    viewport: { width: 1280, height: 900 },
-  })
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", {
-      get: () => undefined,
-    })
-  })
-  const page = await context.newPage()
-  page.setDefaultTimeout(12_000)
-  return page
-}
 
 function classifyStatusText(
   className: string,
@@ -148,6 +104,7 @@ async function runPlatecheckFlow(
     waitUntil: "domcontentloaded",
     timeout: 12_000,
   })
+  await assertPageNotBlocked(page, "NH Platecheck")
 
   // Home → wizard
   await page.getByRole("button", { name: "Next" }).first().click()
@@ -193,11 +150,12 @@ export async function checkNhLiveAvailability(
   try {
     return await withTimeout(
       (async () => {
-        browser = await launchBrowser()
-        const page = await preparePage(browser)
+        browser = await launchStealthBrowser()
+        const { page } = await prepareStealthPage(browser)
         return runPlatecheckFlow(page, options)
       })(),
-      OVERALL_TIMEOUT_MS
+      LIVE_CHECK_TIMEOUT_MS,
+      "NH Platecheck"
     )
   } catch (error) {
     const message =

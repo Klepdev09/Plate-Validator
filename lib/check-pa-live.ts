@@ -17,7 +17,7 @@
 
 import "server-only"
 
-import type { Browser } from "playwright"
+import type { Browser } from "playwright-core"
 
 import {
   LIVE_CHECK_TIMEOUT_MS,
